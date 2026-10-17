@@ -1,5 +1,7 @@
-from fastapi import FastAPI, HTTPException, Header
+
+from fastapi import FastAPI, HTTPException, Header, Depends
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from contextlib import asynccontextmanager
 from pydantic import BaseModel
 import sqlite3
@@ -25,10 +27,13 @@ class NoteIn(BaseModel):
     tags: str = ""
 
 
-def me(auth: str | None):
-    if not auth or not auth.startswith("Bearer "):
-        raise HTTPException(401, "Login first: /docs -> login -> Authorize")
-    data = read_token(auth[7:])
+bearer = HTTPBearer(auto_error=False)
+
+
+def me(cred: HTTPAuthorizationCredentials | None = Depends(bearer)):
+    if not cred:
+        raise HTTPException(401, "Login first: click Authorize, paste token")
+    data = read_token(cred.credentials)
     if not data:
         raise HTTPException(401, "Token bad or expired, login again")
     with db_session() as c:
@@ -91,8 +96,7 @@ def notes(q: str = "", subject: str = ""):
 
 
 @app.post("/api/notes", status_code=201)
-def create(n: NoteIn, authorization: str = Header(default="")):
-    u = me(authorization)
+def create(n: NoteIn, u: dict = Depends(me)):
     if not n.title.strip() or not n.content.strip():
         raise HTTPException(400, "Title + content required")
     with db_session() as c:
@@ -107,8 +111,7 @@ def create(n: NoteIn, authorization: str = Header(default="")):
 
 
 @app.post("/api/notes/{nid}/upvote")
-def upvote(nid: int, authorization: str = Header(default="")):
-    u = me(authorization)
+def upvote(nid: int, u: dict = Depends(me)):
     try:
         with db_session() as c:
             if not c.execute("SELECT * FROM notes WHERE id=?", (nid,)).fetchone():
@@ -121,8 +124,7 @@ def upvote(nid: int, authorization: str = Header(default="")):
 
 
 @app.delete("/api/notes/{nid}")
-def delete(nid: int, authorization: str = Header(default="")):
-    u = me(authorization)
+def delete(nid: int, u: dict = Depends(me)):
     with db_session() as c:
         r = c.execute("SELECT * FROM notes WHERE id=?", (nid,)).fetchone()
         if not r:
